@@ -398,7 +398,7 @@ fn session_thread(
 
                         // Inject globals from last InjectGlobals payload
                         if let Some(ref payload) = last_globals_payload {
-                            let scope = &mut v8::HandleScope::new(iso);
+                            v8::scope!(let scope, iso);
                             let ctx = v8::Local::new(scope, &exec_context);
                             let scope = &mut v8::ContextScope::new(scope, ctx);
                             execution::inject_globals_from_payload(scope, payload);
@@ -441,7 +441,7 @@ fn session_thread(
                         let _sync_store;
                         let _async_store;
                         {
-                            let scope = &mut v8::HandleScope::new(iso);
+                            v8::scope!(let scope, iso);
                             let ctx = v8::Local::new(scope, &exec_context);
                             let scope = &mut v8::ContextScope::new(scope, ctx);
 
@@ -459,7 +459,7 @@ fn session_thread(
                         // Run post-restore init script (config, mutable state reset)
                         // after bridge fn replacement but before user code
                         if !post_restore_script.is_empty() {
-                            let scope = &mut v8::HandleScope::new(iso);
+                            v8::scope!(let scope, iso);
                             let ctx = v8::Local::new(scope, &exec_context);
                             let scope = &mut v8::ContextScope::new(scope, ctx);
                             let (prs_code, prs_err) =
@@ -504,7 +504,7 @@ fn session_thread(
                             Some(file_path.as_str())
                         };
                         let (mut code, mut exports, mut error) = if mode == 0 {
-                            let scope = &mut v8::HandleScope::new(iso);
+                            v8::scope!(let scope, iso);
                             let ctx = v8::Local::new(scope, &exec_context);
                             let scope = &mut v8::ContextScope::new(scope, ctx);
                             let (c, e) = execution::execute_script(
@@ -515,7 +515,7 @@ fn session_thread(
                             );
                             (c, None, e)
                         } else {
-                            let scope = &mut v8::HandleScope::new(iso);
+                            v8::scope!(let scope, iso);
                             let ctx = v8::Local::new(scope, &exec_context);
                             let scope = &mut v8::ContextScope::new(scope, ctx);
                             execution::execute_module(
@@ -532,7 +532,7 @@ fn session_thread(
                         // pure-microtask top-level await settles without
                         // needing a bridge event-loop round-trip.
                         if mode != 0 && error.is_none() {
-                            let scope = &mut v8::HandleScope::new(iso);
+                            v8::scope!(let scope, iso);
                             let ctx = v8::Local::new(scope, &exec_context);
                             let scope = &mut v8::ContextScope::new(scope, ctx);
                             if let Some((next_code, next_exports, next_error)) =
@@ -556,7 +556,7 @@ fn session_thread(
                             || execution::has_pending_script_evaluation()
                             || !deferred_queue.lock().unwrap().is_empty();
                         let event_loop_status = if should_enter_event_loop {
-                                let scope = &mut v8::HandleScope::new(iso);
+                                v8::scope!(let scope, iso);
                                 let ctx = v8::Local::new(scope, &exec_context);
                                 let scope = &mut v8::ContextScope::new(scope, ctx);
                                 run_event_loop(
@@ -579,7 +579,7 @@ fn session_thread(
                         // Finalize any entry-module top-level await that was
                         // waiting on bridge-driven async work (timers/network).
                         if !terminated && mode != 0 && error.is_none() {
-                            let scope = &mut v8::HandleScope::new(iso);
+                            v8::scope!(let scope, iso);
                             let ctx = v8::Local::new(scope, &exec_context);
                             let scope = &mut v8::ContextScope::new(scope, ctx);
                             if let Some((next_code, next_exports, next_error)) =
@@ -598,7 +598,7 @@ fn session_thread(
                         if !terminated && mode != 0 && error.is_none() {
                             // Phase 1: call _waitForActiveHandles() to register a pending promise
                             {
-                                let scope = &mut v8::HandleScope::new(iso);
+                                v8::scope!(let scope, iso);
                                 let ctx = v8::Local::new(scope, &exec_context);
                                 let scope = &mut v8::ContextScope::new(scope, ctx);
                                 let global = ctx.global(scope);
@@ -624,7 +624,7 @@ fn session_thread(
                                 || execution::has_pending_script_evaluation()
                                 || !deferred_queue.lock().unwrap().is_empty()
                             {
-                                let scope = &mut v8::HandleScope::new(iso);
+                                v8::scope!(let scope, iso);
                                 let ctx = v8::Local::new(scope, &exec_context);
                                 let scope = &mut v8::ContextScope::new(scope, ctx);
                                 let event_loop_status = run_event_loop(
@@ -646,7 +646,7 @@ fn session_thread(
                         }
 
                         if !terminated && mode == 0 && error.is_none() {
-                            let scope = &mut v8::HandleScope::new(iso);
+                            v8::scope!(let scope, iso);
                             let ctx = v8::Local::new(scope, &exec_context);
                             let scope = &mut v8::ContextScope::new(scope, ctx);
                             if let Some((next_code, next_error)) =
@@ -817,7 +817,7 @@ pub(crate) const ASYNC_BRIDGE_FNS: [&str; 12] = [
 ///
 /// Returns true if execution completed normally, false if terminated.
 pub(crate) fn run_event_loop(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     rx: &Receiver<SessionCommand>,
     pending: &crate::bridge::PendingPromises,
     abort_rx: Option<&crossbeam_channel::Receiver<()>>,
@@ -935,7 +935,7 @@ pub(crate) enum EventLoopStatus {
 }
 
 fn dispatch_event_loop_frame(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     frame: BinaryFrame,
     pending: &crate::bridge::PendingPromises,
 ) -> EventLoopStatus {
@@ -963,7 +963,7 @@ fn dispatch_event_loop_frame(
             payload,
             ..
         } => {
-            let tc = &mut v8::TryCatch::new(scope);
+            v8::tc_scope!(let tc, scope);
             crate::stream::dispatch_stream_event(tc, &event_type, &payload);
             tc.perform_microtask_checkpoint();
             if let Some(exception) = tc.exception() {

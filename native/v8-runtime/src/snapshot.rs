@@ -25,9 +25,12 @@ const MAX_SNAPSHOT_BLOB_BYTES: usize = 50 * 1024 * 1024;
 pub fn create_snapshot(bridge_code: &str) -> Result<v8::StartupData, String> {
     init_v8_platform();
 
-    let mut isolate = v8::Isolate::snapshot_creator(Some(external_refs()), None);
+    let mut isolate = v8::Isolate::snapshot_creator(
+        Some(std::borrow::Cow::Borrowed(external_refs())),
+        None,
+    );
     {
-        let scope = &mut v8::HandleScope::new(&mut isolate);
+        v8::scope!(let scope, &mut isolate);
         let context = v8::Context::new(scope, Default::default());
         let scope = &mut v8::ContextScope::new(scope, context);
 
@@ -71,7 +74,7 @@ pub fn create_snapshot(bridge_code: &str) -> Result<v8::StartupData, String> {
 /// Properties are set as READ_ONLY (not DONT_DELETE) so they remain
 /// configurable — inject_globals_from_payload can redefine them with
 /// READ_ONLY | DONT_DELETE after restore.
-fn inject_snapshot_defaults(scope: &mut v8::HandleScope) {
+fn inject_snapshot_defaults(scope: &mut v8::PinScope) {
     let context = scope.get_current_context();
     let global = context.global(scope);
 
@@ -123,13 +126,13 @@ fn inject_snapshot_defaults(scope: &mut v8::HandleScope) {
 /// creation; V8 does not retain a reference after `Isolate::new()` returns.
 pub fn create_isolate_from_snapshot<B>(blob: B, heap_limit_mb: Option<u32>) -> v8::OwnedIsolate
 where
-    B: std::ops::Deref<Target = [u8]> + std::borrow::Borrow<[u8]> + 'static,
+    B: Into<v8::StartupData>,
 {
     init_v8_platform();
 
     let mut params = v8::CreateParams::default()
-        .snapshot_blob(blob)
-        .external_references(&**external_refs());
+        .snapshot_blob(blob.into())
+        .external_references(std::borrow::Cow::Borrowed(external_refs()));
     if let Some(limit) = heap_limit_mb {
         let limit_bytes = (limit as usize) * 1024 * 1024;
         params = params.heap_limits(0, limit_bytes);
@@ -269,7 +272,7 @@ mod tests {
     use super::*;
 
     fn eval(isolate: &mut v8::OwnedIsolate, code: &str) -> String {
-        let scope = &mut v8::HandleScope::new(isolate);
+        v8::scope!(let scope, isolate);
         let context = v8::Context::new(scope, Default::default());
         let scope = &mut v8::ContextScope::new(scope, context);
         let source = v8::String::new(scope, code).unwrap();
@@ -455,7 +458,7 @@ mod tests {
             // Apply WASM disable (same as session.rs does after restore)
             crate::execution::disable_wasm(&mut isolate);
 
-            let scope = &mut v8::HandleScope::new(&mut isolate);
+            v8::scope!(let scope, &mut isolate);
             let context = v8::Context::new(scope, Default::default());
             let scope = &mut v8::ContextScope::new(scope, context);
 
@@ -494,7 +497,7 @@ mod tests {
             // "Session A": set a global variable
             {
                 let mut isolate = create_isolate_from_snapshot(blob_bytes.clone(), None);
-                let scope = &mut v8::HandleScope::new(&mut isolate);
+                v8::scope!(let scope, &mut isolate);
                 let context = v8::Context::new(scope, Default::default());
                 let scope = &mut v8::ContextScope::new(scope, context);
 
@@ -514,7 +517,7 @@ mod tests {
             // "Session B": fresh context from same snapshot should NOT see session A's data
             {
                 let mut isolate = create_isolate_from_snapshot(blob_bytes.clone(), None);
-                let scope = &mut v8::HandleScope::new(&mut isolate);
+                v8::scope!(let scope, &mut isolate);
                 let context = v8::Context::new(scope, Default::default());
                 let scope = &mut v8::ContextScope::new(scope, context);
 
@@ -566,7 +569,7 @@ mod tests {
             let session_buffers = RefCell::new(SessionBuffers::new());
             let pending = PendingPromises::new();
 
-            let scope = &mut v8::HandleScope::new(&mut isolate);
+            v8::scope!(let scope, &mut isolate);
             let context = v8::Context::new(scope, Default::default());
             let scope = &mut v8::ContextScope::new(scope, context);
 
@@ -616,7 +619,7 @@ mod tests {
             let blob = create_snapshot(bridge_code).expect("snapshot creation");
             let mut isolate = create_isolate_from_snapshot(blob, None);
 
-            let scope = &mut v8::HandleScope::new(&mut isolate);
+            v8::scope!(let scope, &mut isolate);
             let context = v8::Context::new(scope, Default::default());
             let scope = &mut v8::ContextScope::new(scope, context);
 
@@ -658,9 +661,12 @@ mod tests {
         {
             use crate::bridge::register_stub_bridge_fns;
 
-            let mut snapshot_isolate = v8::Isolate::snapshot_creator(Some(external_refs()), None);
+            let mut snapshot_isolate = v8::Isolate::snapshot_creator(
+                Some(std::borrow::Cow::Borrowed(external_refs())),
+                None,
+            );
             {
-                let scope = &mut v8::HandleScope::new(&mut snapshot_isolate);
+                v8::scope!(let scope, &mut snapshot_isolate);
                 let context = v8::Context::new(scope, Default::default());
                 let scope = &mut v8::ContextScope::new(scope, context);
 
@@ -850,7 +856,7 @@ mod tests {
             // Restore and verify default context has the bridge infrastructure
             let blob_bytes: Vec<u8> = blob.to_vec();
             let mut isolate = create_isolate_from_snapshot(blob_bytes, None);
-            let scope = &mut v8::HandleScope::new(&mut isolate);
+            v8::scope!(let scope, &mut isolate);
             let context = v8::Context::new(scope, Default::default());
             let scope = &mut v8::ContextScope::new(scope, context);
 
@@ -949,7 +955,7 @@ mod tests {
             let pending = PendingPromises::new();
 
             // Restore context and replace bridge functions
-            let scope = &mut v8::HandleScope::new(&mut isolate);
+            v8::scope!(let scope, &mut isolate);
             let context = v8::Context::new(scope, Default::default());
             let scope = &mut v8::ContextScope::new(scope, context);
 
@@ -1004,7 +1010,7 @@ mod tests {
             let blob = create_snapshot(bridge_code).expect("snapshot creation");
             let mut isolate = create_isolate_from_snapshot(blob, None);
 
-            let scope = &mut v8::HandleScope::new(&mut isolate);
+            v8::scope!(let scope, &mut isolate);
             let context = v8::Context::new(scope, Default::default());
             let scope = &mut v8::ContextScope::new(scope, context);
 
@@ -1126,7 +1132,7 @@ mod tests {
             // Restore A: set a session-specific global
             {
                 let mut isolate = create_isolate_from_snapshot(blob_bytes.clone(), None);
-                let scope = &mut v8::HandleScope::new(&mut isolate);
+                v8::scope!(let scope, &mut isolate);
                 let context = v8::Context::new(scope, Default::default());
                 let scope = &mut v8::ContextScope::new(scope, context);
 
@@ -1145,7 +1151,7 @@ mod tests {
             // Restore B: session A's state should not be visible
             {
                 let mut isolate = create_isolate_from_snapshot(blob_bytes.clone(), None);
-                let scope = &mut v8::HandleScope::new(&mut isolate);
+                v8::scope!(let scope, &mut isolate);
                 let context = v8::Context::new(scope, Default::default());
                 let scope = &mut v8::ContextScope::new(scope, context);
 

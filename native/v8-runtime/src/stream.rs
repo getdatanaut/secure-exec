@@ -10,7 +10,7 @@
 /// - "http2" → _http2Dispatch
 /// - "stdin", "stdin_end" → _stdinDispatch
 /// - "timer" → _timerDispatch
-pub fn dispatch_stream_event(scope: &mut v8::HandleScope, event_type: &str, payload: &[u8]) {
+pub fn dispatch_stream_event(scope: &mut v8::PinScope, event_type: &str, payload: &[u8]) {
     // Look up the dispatch function on the global object
     let context = scope.get_current_context();
     let global = context.global(scope);
@@ -35,7 +35,7 @@ pub fn dispatch_stream_event(scope: &mut v8::HandleScope, event_type: &str, payl
             let event_str = v8::String::new(scope, event_type).unwrap();
             let payload_val = if !payload.is_empty() {
                 let maybe_v8_payload = {
-                    let tc = &mut v8::TryCatch::new(scope);
+                    v8::tc_scope!(let tc, scope);
                     crate::bridge::deserialize_v8_value(tc, payload).ok()
                 };
                 match maybe_v8_payload {

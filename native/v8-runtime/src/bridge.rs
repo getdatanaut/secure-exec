@@ -33,21 +33,32 @@ pub fn is_cbor_codec() -> bool {
     USE_CBOR_CODEC.load(Ordering::Relaxed)
 }
 
+/// Send+Sync wrapper over a Vec of ExternalReference so it can live in a
+/// `static OnceLock`. ExternalReference is a union of function pointers and
+/// raw pointers, so Rust marks it !Send/!Sync by default. V8 treats the list
+/// as read-only after construction and accesses it from any thread, so
+/// forcing Send+Sync here is sound.
+struct ExternalRefList(Vec<v8::ExternalReference>);
+unsafe impl Send for ExternalRefList {}
+unsafe impl Sync for ExternalRefList {}
+
 /// External references for V8 snapshot serialization.
 /// Maps function pointer indices in the snapshot to current addresses.
 /// Must be identical at snapshot creation and restore time.
-pub fn external_refs() -> &'static v8::ExternalReferences {
-    static REFS: OnceLock<v8::ExternalReferences> = OnceLock::new();
-    REFS.get_or_init(|| {
-        v8::ExternalReferences::new(&[
-            v8::ExternalReference {
-                function: sync_bridge_callback.map_fn_to(),
-            },
-            v8::ExternalReference {
-                function: async_bridge_callback.map_fn_to(),
-            },
-        ])
-    })
+pub fn external_refs() -> &'static [v8::ExternalReference] {
+    static REFS: OnceLock<ExternalRefList> = OnceLock::new();
+    &REFS
+        .get_or_init(|| {
+            ExternalRefList(vec![
+                v8::ExternalReference {
+                    function: sync_bridge_callback.map_fn_to(),
+                },
+                v8::ExternalReference {
+                    function: async_bridge_callback.map_fn_to(),
+                },
+            ])
+        })
+        .0
 }
 
 // Minimal delegate for V8 ValueSerializer — throws DataCloneError as a V8 exception
@@ -56,7 +67,7 @@ struct DefaultSerializerDelegate;
 impl v8::ValueSerializerImpl for DefaultSerializerDelegate {
     fn throw_data_clone_error<'s>(
         &self,
-        scope: &mut v8::HandleScope<'s>,
+        scope: &mut v8::PinScope<'s, '_>,
         message: v8::Local<'s, v8::String>,
     ) {
         let exc = v8::Exception::error(scope, message);
@@ -74,7 +85,7 @@ impl v8::ValueDeserializerImpl for DefaultDeserializerDelegate {}
 /// Uint8Array, Date, Map, Set, RegExp, Error, and circular references.
 /// When CBOR codec is active, uses ciborium instead.
 pub fn serialize_v8_value(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     value: v8::Local<v8::Value>,
 ) -> Result<Vec<u8>, String> {
     if is_cbor_codec() {
@@ -95,7 +106,7 @@ pub fn serialize_v8_value(
 /// V8's serializer allocates internally; the result is copied into the buffer
 /// so the buffer grows to high-water mark across calls.
 pub fn serialize_v8_value_into(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     value: v8::Local<v8::Value>,
     buf: &mut Vec<u8>,
 ) -> Result<(), String> {
@@ -108,7 +119,7 @@ pub fn serialize_v8_value_into(
 /// Deserialize bytes back to a V8 value using V8's built-in ValueDeserializer.
 /// The bytes must have been produced by serialize_v8_value() or node:v8.serialize().
 pub fn deserialize_v8_value<'s>(
-    scope: &mut v8::HandleScope<'s>,
+    scope: &mut v8::PinScope<'s, '_>,
     data: &[u8],
 ) -> Result<v8::Local<'s, v8::Value>, String> {
     if is_cbor_codec() {
@@ -128,7 +139,7 @@ pub fn deserialize_v8_value<'s>(
 // ── CBOR codec ──
 
 /// Convert a V8 value to a ciborium::Value for CBOR serialization.
-fn v8_to_cbor(scope: &mut v8::HandleScope, value: v8::Local<v8::Value>) -> ciborium::Value {
+fn v8_to_cbor(scope: &mut v8::PinScope, value: v8::Local<v8::Value>) -> ciborium::Value {
     if value.is_null_or_undefined() {
         return ciborium::Value::Null;
     }
@@ -185,7 +196,7 @@ fn v8_to_cbor(scope: &mut v8::HandleScope, value: v8::Local<v8::Value>) -> cibor
 
 /// Convert a ciborium::Value to a V8 value.
 fn cbor_to_v8<'s>(
-    scope: &mut v8::HandleScope<'s>,
+    scope: &mut v8::PinScope<'s, '_>,
     value: &ciborium::Value,
 ) -> v8::Local<'s, v8::Value> {
     match value {
@@ -242,7 +253,7 @@ fn cbor_to_v8<'s>(
 
 /// Serialize a V8 value to CBOR bytes.
 pub fn serialize_cbor_value(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     value: v8::Local<v8::Value>,
 ) -> Result<Vec<u8>, String> {
     let cbor_val = v8_to_cbor(scope, value);
@@ -254,7 +265,7 @@ pub fn serialize_cbor_value(
 
 /// Deserialize CBOR bytes to a V8 value.
 pub fn deserialize_cbor_value<'s>(
-    scope: &mut v8::HandleScope<'s>,
+    scope: &mut v8::PinScope<'s, '_>,
     data: &[u8],
 ) -> Result<v8::Local<'s, v8::Value>, String> {
     let cbor_val: ciborium::Value = ciborium::from_reader(data)
@@ -349,7 +360,7 @@ impl PendingPromises {
 /// The BridgeCallContext pointer must remain valid for the lifetime of the V8 context.
 /// The returned BridgeFnStore must also be kept alive.
 pub fn register_sync_bridge_fns(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     ctx: *const BridgeCallContext,
     buffers: *const RefCell<SessionBuffers>,
     methods: &[&str],
@@ -383,7 +394,7 @@ pub fn register_sync_bridge_fns(
 
 /// V8 FunctionTemplate callback for sync-blocking bridge calls.
 fn sync_bridge_callback(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
 ) {
@@ -425,7 +436,7 @@ fn sync_bridge_callback(
             // treat as raw binary (Uint8Array) — covers status=2 raw binary
             // and V8 version incompatibilities for typed arrays.
             let v8_val = {
-                let tc = &mut v8::TryCatch::new(scope);
+                v8::tc_scope!(let tc, scope);
                 deserialize_v8_value(tc, &result_bytes).ok()
             };
             if let Some(val) = v8_val {
@@ -470,7 +481,7 @@ fn sync_bridge_callback(
 /// The BridgeCallContext and PendingPromises pointers must remain valid
 /// for the lifetime of the V8 context.
 pub fn register_async_bridge_fns(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     ctx: *const BridgeCallContext,
     pending: *const PendingPromises,
     buffers: *const RefCell<SessionBuffers>,
@@ -506,7 +517,7 @@ pub fn register_async_bridge_fns(
 
 /// V8 FunctionTemplate callback for async promise-returning bridge calls.
 fn async_bridge_callback(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
 ) {
@@ -582,7 +593,7 @@ fn async_bridge_callback(
 /// Returns (BridgeFnStore, AsyncBridgeFnStore) that must be kept alive
 /// for the lifetime of the V8 context.
 pub fn replace_bridge_fns(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     ctx: *const BridgeCallContext,
     pending: *const PendingPromises,
     buffers: *const RefCell<SessionBuffers>,
@@ -605,7 +616,7 @@ pub fn replace_bridge_fns(
 /// After snapshot restore, these stubs are replaced with real functions
 /// that have proper External data pointing to a session-local BridgeCallContext.
 pub fn register_stub_bridge_fns(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     sync_fns: &[&str],
     async_fns: &[&str],
 ) {
@@ -632,7 +643,7 @@ pub fn register_stub_bridge_fns(
 /// Serialize V8 function arguments into a pre-allocated buffer.
 /// The buffer is cleared and reused across calls (grows to high-water mark).
 fn serialize_v8_args_into(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     args: &v8::FunctionCallbackArguments,
     buf: &mut Vec<u8>,
 ) -> Result<(), String> {
@@ -649,7 +660,7 @@ fn serialize_v8_args_into(
 /// Called when a BridgeResponse arrives during the session event loop.
 /// Flushes microtasks after resolution to process .then() handlers.
 pub fn resolve_pending_promise(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     pending: &PendingPromises,
     call_id: u64,
     result: Option<Vec<u8>>,
@@ -667,7 +678,7 @@ pub fn resolve_pending_promise(
     } else if let Some(result_bytes) = result {
         // Try V8 deserialization in a TryCatch scope; fallback to raw binary
         let v8_val = {
-            let tc = &mut v8::TryCatch::new(scope);
+            v8::tc_scope!(let tc, scope);
             deserialize_v8_value(tc, &result_bytes).ok()
         };
         if let Some(val) = v8_val {

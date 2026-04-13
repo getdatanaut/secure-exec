@@ -55,7 +55,7 @@ pub fn disable_wasm(isolate: &mut v8::OwnedIsolate) {
 /// Must be called within a ContextScope.
 #[cfg(test)]
 pub fn inject_globals(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     process_config: &ProcessConfig,
     os_config: &OsConfig,
 ) {
@@ -86,7 +86,7 @@ pub fn inject_globals(
 /// The payload is produced by node:v8.serialize() on the host side.
 /// Deserializes into V8, extracts processConfig and osConfig, freezes them,
 /// and sets them as non-writable, non-configurable global properties.
-pub fn inject_globals_from_payload(scope: &mut v8::HandleScope, payload: &[u8]) {
+pub fn inject_globals_from_payload(scope: &mut v8::PinScope, payload: &[u8]) {
     let context = scope.get_current_context();
     let global = context.global(scope);
 
@@ -138,11 +138,11 @@ pub fn inject_globals_from_payload(scope: &mut v8::HandleScope, payload: &[u8]) 
 /// Creates its own TryCatch scope internally so the caller's scope is released.
 /// Returns (exit_code, error) — exit code 0 on success.
 fn run_bridge_cached(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     bridge_code: &str,
     cache: &mut Option<BridgeCodeCache>,
 ) -> (i32, Option<ExecutionError>) {
-    let tc = &mut v8::TryCatch::new(scope);
+    v8::tc_scope!(let tc, scope);
 
     let v8_source = match v8::String::new(tc, bridge_code) {
         Some(s) => s,
@@ -252,11 +252,11 @@ fn run_bridge_cached(
 /// Run a short init script (e.g. post-restore config). Compiles and executes
 /// via v8::Script, returning (exit_code, error) on failure. No code caching.
 #[cfg(not(test))]
-pub fn run_init_script(scope: &mut v8::HandleScope, code: &str) -> (i32, Option<ExecutionError>) {
+pub fn run_init_script(scope: &mut v8::PinScope, code: &str) -> (i32, Option<ExecutionError>) {
     if code.is_empty() {
         return (0, None);
     }
-    let tc = &mut v8::TryCatch::new(scope);
+    v8::tc_scope!(let tc, scope);
     let source = match v8::String::new(tc, code) {
         Some(s) => s,
         None => {
@@ -301,7 +301,7 @@ pub fn run_init_script(scope: &mut v8::HandleScope, code: &str) -> (i32, Option<
 /// via v8::Script. Returns (exit_code, error) — exit code 0 on success, 1 on error.
 /// The `bridge_cache` parameter enables code caching for repeated bridge compilations.
 pub fn execute_script(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     bridge_code: &str,
     user_code: &str,
     bridge_cache: &mut Option<BridgeCodeCache>,
@@ -316,7 +316,7 @@ pub fn execute_script(
 
     // Run user code
     {
-        let tc = &mut v8::TryCatch::new(scope);
+        v8::tc_scope!(let tc, scope);
         let source = match v8::String::new(tc, user_code) {
             Some(s) => s,
             None => {
@@ -400,7 +400,7 @@ pub fn execute_script(
 /// ProcessExitError is detected by sentinel property, not by regex matching on the
 /// error message or constructor name.
 pub fn extract_process_exit_code(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     exception: v8::Local<v8::Value>,
 ) -> Option<i32> {
     if !exception.is_object() {
@@ -426,7 +426,7 @@ pub fn extract_process_exit_code(
 /// For ProcessExitError (detected via _isProcessExit sentinel), returns the error's exit code.
 /// For other errors, returns exit code 1.
 pub(crate) fn exception_to_result(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     exception: v8::Local<v8::Value>,
 ) -> (i32, ExecutionError) {
     let exit_code = extract_process_exit_code(scope, exception).unwrap_or(1);
@@ -439,7 +439,7 @@ pub(crate) fn exception_to_result(
 /// Reads constructor.name for error type, .message for the message,
 /// .stack for the stack trace, and optional .code for Node-style error codes.
 pub(crate) fn extract_error_info(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     exception: v8::Local<v8::Value>,
 ) -> ExecutionError {
     if !exception.is_object() {
@@ -507,7 +507,7 @@ pub(crate) fn extract_error_info(
 /// Build the _processConfig JS object: { cwd, env, timing_mitigation, frozen_time_ms }
 #[cfg(test)]
 fn build_process_config<'s>(
-    scope: &mut v8::HandleScope<'s>,
+    scope: &mut v8::PinScope<'s, '_>,
     config: &ProcessConfig,
 ) -> v8::Local<'s, v8::Object> {
     let obj = v8::Object::new(scope);
@@ -547,7 +547,7 @@ fn build_process_config<'s>(
 /// Build the _osConfig JS object: { homedir, tmpdir, platform, arch }
 #[cfg(test)]
 fn build_os_config<'s>(
-    scope: &mut v8::HandleScope<'s>,
+    scope: &mut v8::PinScope<'s, '_>,
     config: &OsConfig,
 ) -> v8::Local<'s, v8::Object> {
     let obj = v8::Object::new(scope);
@@ -643,7 +643,7 @@ pub fn has_pending_script_evaluation() -> bool {
     PENDING_SCRIPT_EVALUATION.with(|cell| cell.borrow().is_some())
 }
 
-pub fn pending_module_evaluation_needs_wait(scope: &mut v8::HandleScope) -> bool {
+pub fn pending_module_evaluation_needs_wait(scope: &mut v8::PinScope) -> bool {
     PENDING_MODULE_EVALUATION.with(|cell| {
         let borrow = cell.borrow();
         let Some(pending) = borrow.as_ref() else {
@@ -654,7 +654,7 @@ pub fn pending_module_evaluation_needs_wait(scope: &mut v8::HandleScope) -> bool
     })
 }
 
-pub fn pending_script_evaluation_needs_wait(scope: &mut v8::HandleScope) -> bool {
+pub fn pending_script_evaluation_needs_wait(scope: &mut v8::PinScope) -> bool {
     PENDING_SCRIPT_EVALUATION.with(|cell| {
         let borrow = cell.borrow();
         let Some(pending) = borrow.as_ref() else {
@@ -666,7 +666,7 @@ pub fn pending_script_evaluation_needs_wait(scope: &mut v8::HandleScope) -> bool
 }
 
 fn set_pending_module_evaluation(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     module: v8::Local<v8::Module>,
     promise: v8::Local<v8::Promise>,
 ) {
@@ -679,7 +679,7 @@ fn set_pending_module_evaluation(
 }
 
 pub fn set_pending_script_evaluation(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     promise: v8::Local<v8::Promise>,
 ) {
     PENDING_SCRIPT_EVALUATION.with(|cell| {
@@ -690,7 +690,7 @@ pub fn set_pending_script_evaluation(
 }
 
 pub(crate) fn take_unhandled_promise_rejection(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
 ) -> Option<ExecutionError> {
     scope
         .get_slot_mut::<crate::isolate::PromiseRejectState>()
@@ -698,10 +698,10 @@ pub(crate) fn take_unhandled_promise_rejection(
 }
 
 pub fn finalize_pending_script_evaluation(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
 ) -> Option<(i32, Option<ExecutionError>)> {
     let pending = PENDING_SCRIPT_EVALUATION.with(|cell| cell.borrow_mut().take())?;
-    let tc = &mut v8::TryCatch::new(scope);
+    v8::tc_scope!(let tc, scope);
     let promise = v8::Local::new(tc, &pending.promise);
 
     tc.perform_microtask_checkpoint();
@@ -732,7 +732,7 @@ pub fn finalize_pending_script_evaluation(
 }
 
 fn serialize_module_exports(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     module: v8::Local<v8::Module>,
 ) -> Result<Vec<u8>, ExecutionError> {
     // Serialize module namespace (exports)
@@ -784,10 +784,10 @@ fn serialize_module_exports(
 
 #[cfg_attr(test, allow(dead_code))]
 pub fn finalize_pending_module_evaluation(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
 ) -> Option<(i32, Option<Vec<u8>>, Option<ExecutionError>)> {
     let pending = PENDING_MODULE_EVALUATION.with(|cell| cell.borrow_mut().take())?;
-    let tc = &mut v8::TryCatch::new(scope);
+    v8::tc_scope!(let tc, scope);
     let module = v8::Local::new(tc, &pending.module);
     let promise = v8::Local::new(tc, &pending.promise);
 
@@ -837,7 +837,7 @@ pub fn finalize_pending_module_evaluation(
 /// Returns (exit_code, serialized_exports, error).
 /// The `bridge_cache` parameter enables code caching for repeated bridge compilations.
 pub fn execute_module(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     bridge_ctx: &BridgeCallContext,
     bridge_code: &str,
     user_code: &str,
@@ -866,7 +866,7 @@ pub fn execute_module(
 
     // Compile and evaluate as ES module
     {
-        let tc = &mut v8::TryCatch::new(scope);
+        v8::tc_scope!(let tc, scope);
         let resource_name_str = file_path.unwrap_or("<user_module>");
         let resource = v8::String::new(tc, resource_name_str).unwrap();
         let origin = v8::ScriptOrigin::new(
@@ -1034,7 +1034,7 @@ pub fn execute_module(
 /// Returns a list of (specifier, referrer_name) pairs for all imports
 /// that are not already in the module cache.
 fn extract_uncached_imports(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     module: v8::Local<v8::Module>,
     referrer_name: &str,
 ) -> Vec<(String, String)> {
@@ -1066,7 +1066,7 @@ fn extract_uncached_imports(
 /// for any newly discovered imports. Falls back silently if the host doesn't
 /// support batch resolution (the resolve callback handles individual resolution).
 fn prefetch_module_imports(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     bridge_ctx: &BridgeCallContext,
     root_module: v8::Local<v8::Module>,
     root_name: &str,
@@ -1192,7 +1192,7 @@ fn prefetch_module_imports(
 }
 
 fn resolve_or_compile_module<'s>(
-    scope: &mut v8::HandleScope<'s>,
+    scope: &mut v8::PinScope<'s, '_>,
     specifier_str: &str,
     referrer_name: &str,
 ) -> Option<v8::Local<'s, v8::Module>> {
@@ -1304,7 +1304,7 @@ pub extern "C" fn import_meta_object_callback(
     module: v8::Local<v8::Module>,
     meta: v8::Local<v8::Object>,
 ) {
-    let scope = &mut unsafe { v8::CallbackScope::new(context) };
+    v8::callback_scope!(unsafe let scope, context);
 
     // Look up the module's resource name from MODULE_RESOLVE_STATE.module_names
     // which maps identity_hash → resource_name.
@@ -1335,7 +1335,7 @@ pub extern "C" fn import_meta_object_callback(
 
 #[cfg_attr(test, allow(dead_code))]
 fn dynamic_import_namespace_callback(
-    _scope: &mut v8::HandleScope,
+    _scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
 ) {
@@ -1344,7 +1344,7 @@ fn dynamic_import_namespace_callback(
 
 #[cfg_attr(test, allow(dead_code))]
 fn dynamic_import_reject_callback(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     args: v8::FunctionCallbackArguments,
     mut rv: v8::ReturnValue,
 ) {
@@ -1355,13 +1355,13 @@ fn dynamic_import_reject_callback(
 
 #[cfg_attr(test, allow(dead_code))]
 pub fn dynamic_import_callback<'a>(
-    scope: &mut v8::HandleScope<'a>,
+    scope: &mut v8::PinScope<'a, '_>,
     _host_defined_options: v8::Local<'a, v8::Data>,
     resource_name: v8::Local<'a, v8::Value>,
     specifier: v8::Local<'a, v8::String>,
     _import_attributes: v8::Local<'a, v8::FixedArray>,
 ) -> Option<v8::Local<'a, v8::Promise>> {
-    let tc = &mut v8::TryCatch::new(scope);
+    v8::tc_scope!(let tc, scope);
 
     let specifier_str = specifier.to_rust_string_lossy(tc);
     let referrer_name = resource_name.to_rust_string_lossy(tc);
@@ -1438,7 +1438,7 @@ pub fn dynamic_import_callback<'a>(
 
 #[cfg_attr(test, allow(dead_code))]
 fn resolved_promise<'s>(
-    scope: &mut v8::HandleScope<'s>,
+    scope: &mut v8::PinScope<'s, '_>,
     value: v8::Local<'s, v8::Value>,
 ) -> Option<v8::Local<'s, v8::Promise>> {
     let resolver = v8::PromiseResolver::new(scope)?;
@@ -1448,7 +1448,7 @@ fn resolved_promise<'s>(
 
 #[cfg_attr(test, allow(dead_code))]
 fn rejected_promise<'s>(
-    scope: &mut v8::HandleScope<'s>,
+    scope: &mut v8::PinScope<'s, '_>,
     reason: v8::Local<'s, v8::Value>,
 ) -> Option<v8::Local<'s, v8::Promise>> {
     let resolver = v8::PromiseResolver::new(scope)?;
@@ -1462,7 +1462,7 @@ fn rejected_promise<'s>(
 /// {resolved, source} results (null entries for unresolvable modules).
 /// Returns None if the host doesn't support batch resolution or on IPC error.
 fn batch_resolve_via_ipc(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     ctx: &BridgeCallContext,
     batch: &[(String, String)],
 ) -> Option<Vec<Option<(String, String)>>> {
@@ -1528,7 +1528,7 @@ fn module_resolve_callback<'a>(
     referrer: v8::Local<'a, v8::Module>,
 ) -> Option<v8::Local<'a, v8::Module>> {
     // SAFETY: CallbackScope can be constructed from Local<Context> within a V8 callback
-    let scope = &mut unsafe { v8::CallbackScope::new(context) };
+    v8::callback_scope!(unsafe let scope, context);
 
     let specifier_str = specifier.to_rust_string_lossy(scope);
     let referrer_hash = referrer.get_identity_hash();
@@ -1544,7 +1544,7 @@ fn module_resolve_callback<'a>(
 
 /// Send _resolveModule(specifier, referrer_path) via sync-blocking IPC.
 fn resolve_module_via_ipc(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     ctx: &BridgeCallContext,
     specifier: &str,
     referrer: &str,
@@ -1594,7 +1594,7 @@ fn resolve_module_via_ipc(
 
 /// Send _loadFile(resolved_path) via sync-blocking IPC.
 fn load_module_via_ipc(
-    scope: &mut v8::HandleScope,
+    scope: &mut v8::PinScope,
     ctx: &BridgeCallContext,
     resolved_path: &str,
 ) -> Option<String> {
@@ -1641,7 +1641,7 @@ fn load_module_via_ipc(
 }
 
 /// Throw a V8 exception for module resolution errors.
-fn throw_module_error(scope: &mut v8::HandleScope, message: &str) {
+fn throw_module_error(scope: &mut v8::PinScope, message: &str) {
     let msg = v8::String::new(scope, message).unwrap();
     let exc = v8::Exception::error(scope, msg);
     scope.throw_exception(exc);
@@ -1675,7 +1675,7 @@ mod tests {
         ctx: &v8::Global<v8::Context>,
         s: &str,
     ) -> Vec<u8> {
-        let scope = &mut v8::HandleScope::new(iso);
+        v8::scope!(let scope, iso);
         let local = v8::Local::new(scope, ctx);
         let scope = &mut v8::ContextScope::new(scope, local);
         let val = v8::String::new(scope, s).unwrap();
@@ -1688,7 +1688,7 @@ mod tests {
         ctx: &v8::Global<v8::Context>,
         n: i64,
     ) -> Vec<u8> {
-        let scope = &mut v8::HandleScope::new(iso);
+        v8::scope!(let scope, iso);
         let local = v8::Local::new(scope, ctx);
         let scope = &mut v8::ContextScope::new(scope, local);
         let val = v8::Number::new(scope, n as f64);
@@ -1697,7 +1697,7 @@ mod tests {
 
     /// Helper: serialize a V8 null value for test BridgeResponse payloads
     fn v8_serialize_null(iso: &mut v8::OwnedIsolate, ctx: &v8::Global<v8::Context>) -> Vec<u8> {
-        let scope = &mut v8::HandleScope::new(iso);
+        v8::scope!(let scope, iso);
         let local = v8::Local::new(scope, ctx);
         let scope = &mut v8::ContextScope::new(scope, local);
         let val = v8::null(scope);
@@ -1710,7 +1710,7 @@ mod tests {
         ctx: &v8::Global<v8::Context>,
         expr: &str,
     ) -> Vec<u8> {
-        let scope = &mut v8::HandleScope::new(iso);
+        v8::scope!(let scope, iso);
         let local = v8::Local::new(scope, ctx);
         let scope = &mut v8::ContextScope::new(scope, local);
         let source = v8::String::new(scope, expr).unwrap();
@@ -1725,7 +1725,7 @@ mod tests {
         context: &v8::Global<v8::Context>,
         code: &str,
     ) -> String {
-        let scope = &mut v8::HandleScope::new(isolate);
+        v8::scope!(let scope, isolate);
         let local = v8::Local::new(scope, context);
         let scope = &mut v8::ContextScope::new(scope, local);
         let source = v8::String::new(scope, code).unwrap();
@@ -1740,7 +1740,7 @@ mod tests {
         context: &v8::Global<v8::Context>,
         code: &str,
     ) -> bool {
-        let scope = &mut v8::HandleScope::new(isolate);
+        v8::scope!(let scope, isolate);
         let local = v8::Local::new(scope, context);
         let scope = &mut v8::ContextScope::new(scope, local);
         let source = v8::String::new(scope, code).unwrap();
@@ -1755,10 +1755,10 @@ mod tests {
         context: &v8::Global<v8::Context>,
         code: &str,
     ) -> bool {
-        let scope = &mut v8::HandleScope::new(isolate);
+        v8::scope!(let scope, isolate);
         let local = v8::Local::new(scope, context);
         let scope = &mut v8::ContextScope::new(scope, local);
-        let tc = &mut v8::TryCatch::new(scope);
+        v8::tc_scope!(let tc, scope);
         let source = v8::String::new(tc, code).unwrap();
         if let Some(script) = v8::Script::compile(tc, source, None) {
             script.run(tc);
@@ -1825,7 +1825,7 @@ mod tests {
 
             // Inject globals
             {
-                let scope = &mut v8::HandleScope::new(&mut isolate);
+                v8::scope!(let scope, &mut isolate);
                 let ctx = v8::Local::new(scope, &context);
                 let scope = &mut v8::ContextScope::new(scope, ctx);
                 inject_globals(scope, &process_config, &os_config);
@@ -1879,7 +1879,7 @@ mod tests {
             };
 
             {
-                let scope = &mut v8::HandleScope::new(&mut isolate);
+                v8::scope!(let scope, &mut isolate);
                 let ctx = v8::Local::new(scope, &context);
                 let scope = &mut v8::ContextScope::new(scope, ctx);
                 inject_globals(scope, &process_config, &os_config);
@@ -1914,7 +1914,7 @@ mod tests {
             };
 
             {
-                let scope = &mut v8::HandleScope::new(&mut isolate);
+                v8::scope!(let scope, &mut isolate);
                 let ctx = v8::Local::new(scope, &context);
                 let scope = &mut v8::ContextScope::new(scope, ctx);
                 inject_globals(scope, &process_config, &os_config);
@@ -1990,7 +1990,7 @@ mod tests {
             };
 
             {
-                let scope = &mut v8::HandleScope::new(&mut isolate);
+                v8::scope!(let scope, &mut isolate);
                 let ctx = v8::Local::new(scope, &context);
                 let scope = &mut v8::ContextScope::new(scope, ctx);
                 inject_globals(scope, &process_config, &os_config);
@@ -2028,7 +2028,7 @@ mod tests {
             };
 
             {
-                let scope = &mut v8::HandleScope::new(&mut isolate);
+                v8::scope!(let scope, &mut isolate);
                 let ctx = v8::Local::new(scope, &context);
                 let scope = &mut v8::ContextScope::new(scope, ctx);
                 inject_globals(scope, &process_config, &os_config);
@@ -2098,7 +2098,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_sync_bridge_fns(
@@ -2138,7 +2138,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_sync_bridge_fns(
@@ -2192,7 +2192,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_sync_bridge_fns(
@@ -2233,7 +2233,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_sync_bridge_fns(
@@ -2263,7 +2263,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -2301,7 +2301,7 @@ mod tests {
             let result_v8 = v8_serialize_str(&mut iso, &ctx, "async result");
 
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 bridge::resolve_pending_promise(scope, &pending, 1, Some(result_v8), None).unwrap();
@@ -2311,7 +2311,7 @@ mod tests {
 
             // Verify promise is fulfilled with correct value
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let source = v8::String::new(scope, "_promise").unwrap();
@@ -2341,7 +2341,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -2358,7 +2358,7 @@ mod tests {
 
             // Reject the promise
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 bridge::resolve_pending_promise(
@@ -2375,7 +2375,7 @@ mod tests {
 
             // Verify promise is rejected with error
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let source = v8::String::new(scope, "_promise").unwrap();
@@ -2409,7 +2409,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -2431,7 +2431,7 @@ mod tests {
             // Resolve in reverse order (p2 first, then p1)
             let r2 = v8_serialize_str(&mut iso, &ctx, "dns-result");
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 bridge::resolve_pending_promise(scope, &pending, 2, Some(r2), None).unwrap();
@@ -2440,7 +2440,7 @@ mod tests {
 
             let r1 = v8_serialize_str(&mut iso, &ctx, "fetch-result");
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 bridge::resolve_pending_promise(scope, &pending, 1, Some(r1), None).unwrap();
@@ -2449,7 +2449,7 @@ mod tests {
 
             // Verify both promises fulfilled correctly
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -2490,7 +2490,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -2506,7 +2506,7 @@ mod tests {
 
             // Resolve with None (null result)
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 bridge::resolve_pending_promise(scope, &pending, 1, None, None).unwrap();
@@ -2514,7 +2514,7 @@ mod tests {
 
             // Promise should be fulfilled with undefined
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let source = v8::String::new(scope, "_promise").unwrap();
@@ -2541,7 +2541,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -2565,7 +2565,7 @@ mod tests {
 
             // Resolve the promise (microtasks flushed inside resolve_pending_promise)
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 bridge::resolve_pending_promise(scope, &pending, 1, None, None).unwrap();
@@ -2581,7 +2581,7 @@ mod tests {
             let ctx = isolate::create_context(&mut iso);
 
             let (code, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(scope, "", "var x = 1 + 2;", &mut None)
@@ -2601,7 +2601,7 @@ mod tests {
             let bridge = "(function() { globalThis._bridgeReady = true; })()";
             let user = "var _sawBridge = _bridgeReady;";
             let (code, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(scope, bridge, user, &mut None)
@@ -2619,7 +2619,7 @@ mod tests {
             let ctx = isolate::create_context(&mut iso);
 
             let (code, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(
@@ -2642,7 +2642,7 @@ mod tests {
             let ctx = isolate::create_context(&mut iso);
 
             let (code, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(scope, "", "var x = {;", &mut None)
@@ -2660,7 +2660,7 @@ mod tests {
             let ctx = isolate::create_context(&mut iso);
 
             let (code, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(scope, "", "null.foo", &mut None)
@@ -2679,7 +2679,7 @@ mod tests {
             let ctx = isolate::create_context(&mut iso);
 
             let (code, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(scope, "function {", "var x = 1;", &mut None)
@@ -2698,7 +2698,7 @@ mod tests {
             let ctx = isolate::create_context(&mut iso);
 
             let (code, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(scope, "", "'hello'", &mut None)
@@ -2714,7 +2714,7 @@ mod tests {
             let ctx = isolate::create_context(&mut iso);
 
             let (code, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(
@@ -2738,7 +2738,7 @@ mod tests {
             let ctx = isolate::create_context(&mut iso);
 
             let (code, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(scope, "", "throw 'raw string error';", &mut None)
@@ -2765,7 +2765,7 @@ mod tests {
 
             let user_code = "export const x = 42;\nexport const msg = 'hello';";
             let (code, exports, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_module(scope, &bridge_ctx, "", user_code, None, &mut None)
@@ -2775,7 +2775,7 @@ mod tests {
             assert!(error.is_none());
             let exports = exports.unwrap();
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let val = crate::bridge::deserialize_v8_value(scope, &exports).unwrap();
@@ -2811,7 +2811,7 @@ mod tests {
             );
 
             let (code, exports, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_module(
@@ -2828,7 +2828,7 @@ mod tests {
             assert!(error.is_none());
             let exports = exports.unwrap();
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let val = crate::bridge::deserialize_v8_value(scope, &exports).unwrap();
@@ -2856,7 +2856,7 @@ mod tests {
             );
 
             let (code, _exports, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_module(
@@ -2886,7 +2886,7 @@ mod tests {
             );
 
             let (code, _exports, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_module(
@@ -2918,7 +2918,7 @@ mod tests {
             let bridge = "(function() { globalThis._bridgeReady = true; })()";
             let user = "export const saw = _bridgeReady;";
             let (code, exports, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_module(scope, &bridge_ctx, bridge, user, None, &mut None)
@@ -2928,7 +2928,7 @@ mod tests {
             assert!(error.is_none());
             let exports = exports.unwrap();
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let val = crate::bridge::deserialize_v8_value(scope, &exports).unwrap();
@@ -2973,7 +2973,7 @@ mod tests {
             let user_code =
                 "import { dep_val } from './dep.mjs';\nexport const result = dep_val + 1;";
             let (code, exports, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_module(
@@ -2990,7 +2990,7 @@ mod tests {
             assert!(error.is_none());
             let exports = exports.unwrap();
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let val = crate::bridge::deserialize_v8_value(scope, &exports).unwrap();
@@ -3023,7 +3023,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -3059,7 +3059,7 @@ mod tests {
 
             // Run event loop
             let completed = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
@@ -3088,7 +3088,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -3135,7 +3135,7 @@ mod tests {
             .unwrap();
 
             let completed = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
@@ -3162,7 +3162,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -3187,7 +3187,7 @@ mod tests {
             .unwrap();
 
             let completed = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
@@ -3216,7 +3216,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -3236,7 +3236,7 @@ mod tests {
             tx.send(crate::session::SessionCommand::Shutdown).unwrap();
 
             let completed = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
@@ -3255,7 +3255,7 @@ mod tests {
 
             // No pending promises — event loop should exit immediately
             let completed = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
@@ -3279,7 +3279,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -3331,7 +3331,7 @@ mod tests {
             .unwrap();
 
             let completed = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
@@ -3367,7 +3367,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -3401,7 +3401,7 @@ mod tests {
             .unwrap();
 
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &rx, &pending, None, None);
@@ -3426,7 +3426,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -3487,7 +3487,7 @@ mod tests {
             .unwrap();
 
             let completed = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
@@ -3516,7 +3516,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -3567,7 +3567,7 @@ mod tests {
             .unwrap();
 
             let completed = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
@@ -3595,7 +3595,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -3643,7 +3643,7 @@ mod tests {
             .unwrap();
 
             let completed = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
@@ -3669,7 +3669,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -3712,7 +3712,7 @@ mod tests {
 
             // Should not crash even without dispatch function registered
             let completed = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
@@ -3736,7 +3736,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _fn_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _fn_store = bridge::register_async_bridge_fns(
@@ -3785,7 +3785,7 @@ mod tests {
             .unwrap();
 
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &rx, &pending, None, None);
@@ -3816,7 +3816,7 @@ mod tests {
 
             // Run an infinite loop — timeout should terminate it
             let (code, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(scope, "", "while(true) {}", &mut None)
@@ -3843,7 +3843,7 @@ mod tests {
             let mut guard = crate::timeout::TimeoutGuard::new(5000, iso_handle, abort_tx);
 
             let (code, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(scope, "", "1 + 1", &mut None)
@@ -3889,7 +3889,7 @@ mod tests {
             let session_buffers = std::cell::RefCell::new(bridge::SessionBuffers::new());
             let _async_store;
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 _async_store = bridge::register_async_bridge_fns(
@@ -3903,7 +3903,7 @@ mod tests {
 
             // Execute code that calls async bridge function (creates a pending promise)
             let (_code, _error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(scope, "", "_slowFn('never-responds')", &mut None)
@@ -3917,7 +3917,7 @@ mod tests {
             // Run event loop — it should be terminated by the timeout
             // (no messages on cmd_rx, so it blocks until abort_rx fires)
             let completed = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 crate::session::run_event_loop(scope, &cmd_rx, &pending, Some(&abort_rx), None)
@@ -3950,7 +3950,7 @@ mod tests {
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
 
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -3979,7 +3979,7 @@ mod tests {
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
 
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4003,7 +4003,7 @@ mod tests {
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
 
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4022,7 +4022,7 @@ mod tests {
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
 
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4050,7 +4050,7 @@ mod tests {
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
 
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4079,7 +4079,7 @@ mod tests {
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
 
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4101,7 +4101,7 @@ mod tests {
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
 
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4126,7 +4126,7 @@ mod tests {
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
 
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4158,7 +4158,7 @@ mod tests {
 
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4211,7 +4211,7 @@ mod tests {
 
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4242,7 +4242,7 @@ mod tests {
 
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4294,7 +4294,7 @@ mod tests {
 
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4341,7 +4341,7 @@ mod tests {
 
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4375,7 +4375,7 @@ mod tests {
 
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4432,7 +4432,7 @@ mod tests {
 
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4494,7 +4494,7 @@ mod tests {
 
             let mut iso = isolate::create_isolate(None);
             let ctx = isolate::create_context(&mut iso);
-            let scope = &mut v8::HandleScope::new(&mut iso);
+            v8::scope!(let scope, &mut iso);
             let local = v8::Local::new(scope, &ctx);
             let scope = &mut v8::ContextScope::new(scope, local);
 
@@ -4544,7 +4544,7 @@ mod tests {
 
             let bridge = "(function() { globalThis._cached = 'yes'; })()";
             let (code, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(scope, bridge, "var _saw = _cached;", &mut cache)
@@ -4571,7 +4571,7 @@ mod tests {
             {
                 let ctx = isolate::create_context(&mut iso);
                 let (code, _) = {
-                    let scope = &mut v8::HandleScope::new(&mut iso);
+                    v8::scope!(let scope, &mut iso);
                     let local = v8::Local::new(scope, &ctx);
                     let scope = &mut v8::ContextScope::new(scope, local);
                     execute_script(scope, bridge, "", &mut cache)
@@ -4586,7 +4586,7 @@ mod tests {
             {
                 let ctx = isolate::create_context(&mut iso);
                 let (code, _) = {
-                    let scope = &mut v8::HandleScope::new(&mut iso);
+                    v8::scope!(let scope, &mut iso);
                     let local = v8::Local::new(scope, &ctx);
                     let scope = &mut v8::ContextScope::new(scope, local);
                     execute_script(scope, bridge, "", &mut cache)
@@ -4613,7 +4613,7 @@ mod tests {
             {
                 let ctx = isolate::create_context(&mut iso);
                 let (code, _) = {
-                    let scope = &mut v8::HandleScope::new(&mut iso);
+                    v8::scope!(let scope, &mut iso);
                     let local = v8::Local::new(scope, &ctx);
                     let scope = &mut v8::ContextScope::new(scope, local);
                     execute_script(
@@ -4633,7 +4633,7 @@ mod tests {
             {
                 let ctx = isolate::create_context(&mut iso);
                 let (code, _) = {
-                    let scope = &mut v8::HandleScope::new(&mut iso);
+                    v8::scope!(let scope, &mut iso);
                     let local = v8::Local::new(scope, &ctx);
                     let scope = &mut v8::ContextScope::new(scope, local);
                     execute_script(
@@ -4669,7 +4669,7 @@ mod tests {
             {
                 let ctx = isolate::create_context(&mut iso);
                 let (code, _, _) = {
-                    let scope = &mut v8::HandleScope::new(&mut iso);
+                    v8::scope!(let scope, &mut iso);
                     let local = v8::Local::new(scope, &ctx);
                     let scope = &mut v8::ContextScope::new(scope, local);
                     execute_module(
@@ -4689,7 +4689,7 @@ mod tests {
             {
                 let ctx = isolate::create_context(&mut iso);
                 let (code, exports, _) = {
-                    let scope = &mut v8::HandleScope::new(&mut iso);
+                    v8::scope!(let scope, &mut iso);
                     let local = v8::Local::new(scope, &ctx);
                     let scope = &mut v8::ContextScope::new(scope, local);
                     execute_module(
@@ -4714,7 +4714,7 @@ mod tests {
             let mut cache: Option<BridgeCodeCache> = None;
 
             let (code, _) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_script(scope, "", "var x = 1;", &mut cache)
@@ -4760,7 +4760,7 @@ mod tests {
 
             let user_code = "import { a } from './a.mjs';\nimport { b } from './b.mjs';\nexport const sum = a + b;";
             let (code, exports, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_module(
@@ -4777,7 +4777,7 @@ mod tests {
             assert!(error.is_none());
             let exports = exports.unwrap();
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let val = crate::bridge::deserialize_v8_value(scope, &exports).unwrap();
@@ -4858,7 +4858,7 @@ mod tests {
 
             let user_code = "import { val } from './dep.mjs';\nexport const result = val;";
             let (code, exports, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_module(
@@ -4875,7 +4875,7 @@ mod tests {
             assert!(error.is_none());
             let exports = exports.unwrap();
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let val = crate::bridge::deserialize_v8_value(scope, &exports).unwrap();
@@ -4940,7 +4940,7 @@ mod tests {
 
             let user_code = "import { a } from './a.mjs';\nexport const result = a;";
             let (code, exports, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_module(
@@ -4957,7 +4957,7 @@ mod tests {
             assert!(error.is_none());
             let exports = exports.unwrap();
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let val = crate::bridge::deserialize_v8_value(scope, &exports).unwrap();
@@ -4987,7 +4987,7 @@ mod tests {
 
             let user_code = "export const x = 42;";
             let (code, _exports, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_module(scope, &bridge_ctx, "", user_code, None, &mut None)
@@ -5048,7 +5048,7 @@ mod tests {
                 export const ready = true;
             "#;
             let (code, exports, error) = {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 execute_module(
@@ -5066,10 +5066,10 @@ mod tests {
             assert!(exports.is_some());
 
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
-                let tc = &mut v8::TryCatch::new(scope);
+                v8::tc_scope!(let tc, scope);
                 let source = v8::String::new(
                     tc,
                     "globalThis.__depPromise = globalThis.loadDep().then((value) => { globalThis.__depValue = value; return value; });",
@@ -5094,7 +5094,7 @@ mod tests {
 
             // First serialization grows the buffer
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let val = v8::String::new(scope, "hello world").unwrap();
@@ -5105,7 +5105,7 @@ mod tests {
 
             // Second serialization (smaller value) reuses capacity
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let val = v8::Integer::new(scope, 42);
@@ -5119,7 +5119,7 @@ mod tests {
 
             // Third serialization (larger value) grows buffer
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let long_str = "x".repeat(1024);
@@ -5134,7 +5134,7 @@ mod tests {
 
             // Fourth serialization (small again) stays at high-water mark
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let val = v8::Boolean::new(scope, true);
@@ -5148,7 +5148,7 @@ mod tests {
 
             // Verify the serialized data is correct (round-trip)
             {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
                 let deserialized = bridge::deserialize_v8_value(scope, &buf).expect("deserialize");
@@ -5169,7 +5169,7 @@ mod tests {
 
             // Simulate multiple serializations through SessionBuffers
             for i in 0..5 {
-                let scope = &mut v8::HandleScope::new(&mut iso);
+                v8::scope!(let scope, &mut iso);
                 let local = v8::Local::new(scope, &ctx);
                 let scope = &mut v8::ContextScope::new(scope, local);
 
