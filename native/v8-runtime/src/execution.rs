@@ -1653,6 +1653,7 @@ mod tests {
     use crate::bridge;
     use crate::host_call::BridgeCallContext;
     use crate::isolate;
+    use crate::session::EventLoopStatus;
     use std::collections::HashMap;
     use std::io::{Cursor, Write};
     use std::sync::{Arc, Mutex};
@@ -3065,7 +3066,7 @@ mod tests {
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
             };
 
-            assert!(completed, "event loop should complete normally");
+            assert!(matches!(completed, EventLoopStatus::Completed), "event loop should complete normally");
             assert_eq!(pending.len(), 0);
             assert_eq!(
                 eval(&mut iso, &ctx, "_eventLoopResult"),
@@ -3141,7 +3142,7 @@ mod tests {
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
             };
 
-            assert!(completed);
+            assert!(matches!(completed, EventLoopStatus::Completed));
             assert_eq!(pending.len(), 0);
             assert_eq!(eval(&mut iso, &ctx, "_r1"), "fetch-result");
             assert_eq!(eval(&mut iso, &ctx, "_r2"), "dns-result");
@@ -3193,7 +3194,7 @@ mod tests {
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
             };
 
-            assert!(!completed, "event loop should return false on termination");
+            assert!(matches!(completed, EventLoopStatus::Terminated), "event loop should be terminated");
             // Promise is still pending (not resolved)
             assert_eq!(pending.len(), 1);
 
@@ -3242,7 +3243,7 @@ mod tests {
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
             };
 
-            assert!(!completed, "event loop should return false on shutdown");
+            assert!(matches!(completed, EventLoopStatus::Terminated), "event loop should be terminated on shutdown");
         }
 
         // --- Part 35: Event loop — exits immediately when no pending promises ---
@@ -3261,7 +3262,7 @@ mod tests {
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
             };
 
-            assert!(completed);
+            assert!(matches!(completed, EventLoopStatus::Completed));
         }
 
         // --- Part 36: Event loop — StreamEvent dispatches to V8 callback ---
@@ -3337,7 +3338,7 @@ mod tests {
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
             };
 
-            assert!(completed);
+            assert!(matches!(completed, EventLoopStatus::Completed));
             assert_eq!(pending.len(), 0);
 
             // Verify stream event was dispatched
@@ -3493,7 +3494,7 @@ mod tests {
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
             };
 
-            assert!(completed);
+            assert!(matches!(completed, EventLoopStatus::Completed));
             assert_eq!(eval(&mut iso, &ctx, "_childEvents.length"), "2");
             assert_eq!(eval(&mut iso, &ctx, "_childEvents[0].type"), "child_stderr");
             assert_eq!(eval(&mut iso, &ctx, "_childEvents[0].data"), "error output");
@@ -3573,7 +3574,7 @@ mod tests {
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
             };
 
-            assert!(completed);
+            assert!(matches!(completed, EventLoopStatus::Completed));
             assert_eq!(eval(&mut iso, &ctx, "_httpEvents.length"), "1");
             assert_eq!(eval(&mut iso, &ctx, "_httpEvents[0].type"), "http_request");
             assert_eq!(eval(&mut iso, &ctx, "_httpEvents[0].data.method"), "GET");
@@ -3649,7 +3650,7 @@ mod tests {
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
             };
 
-            assert!(completed);
+            assert!(matches!(completed, EventLoopStatus::Completed));
             // Unknown event should NOT have dispatched to any handler
             assert!(eval_bool(&mut iso, &ctx, "_anyDispatched === false"));
         }
@@ -3718,7 +3719,7 @@ mod tests {
                 crate::session::run_event_loop(scope, &rx, &pending, None, None)
             };
 
-            assert!(completed);
+            assert!(matches!(completed, EventLoopStatus::Completed));
         }
 
         // --- Part 42: StreamEvent microtasks flushed after dispatch ---
@@ -3923,7 +3924,7 @@ mod tests {
                 crate::session::run_event_loop(scope, &cmd_rx, &pending, Some(&abort_rx), None)
             };
 
-            assert!(!completed, "event loop should have been terminated");
+            assert!(matches!(completed, EventLoopStatus::Terminated), "event loop should have been terminated");
             assert!(guard.timed_out(), "timeout should have fired");
 
             guard.cancel();

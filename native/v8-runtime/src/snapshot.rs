@@ -565,6 +565,7 @@ mod tests {
                 Box::new(receiver),
                 "test-session".to_string(),
                 call_id_router,
+                Arc::new(std::sync::atomic::AtomicU64::new(1)),
             );
             let session_buffers = RefCell::new(SessionBuffers::new());
             let pending = PendingPromises::new();
@@ -950,6 +951,7 @@ mod tests {
                 Box::new(receiver),
                 "test-session".to_string(),
                 call_id_router,
+                Arc::new(std::sync::atomic::AtomicU64::new(1)),
             );
             let session_buffers = RefCell::new(SessionBuffers::new());
             let pending = PendingPromises::new();
