@@ -306,4 +306,92 @@ describe("custom bindings integration", () => {
 			nestedAccess: true,
 		});
 	});
+
+	it("preserves Error name, code, message, and stack across the binding boundary", async () => {
+		driver = createDriverWithBindings({
+			throwCustom: () => {
+				const err = new Error("custom failure") as Error & { code?: string };
+				err.name = "CustomError";
+				err.code = "E_CUSTOM";
+				throw err;
+			},
+		});
+
+		const result = await driver.run(`
+			let caught;
+			try {
+				SecureExec.bindings.throwCustom();
+			} catch (e) {
+				caught = {
+					isError: e instanceof Error,
+					name: e.name,
+					message: e.message,
+					code: e.code,
+					hasStack: typeof e.stack === "string" && e.stack.length > 0,
+				};
+			}
+			module.exports = caught;
+		`);
+		expect(result.code).toBe(0);
+		expect(result.exports).toEqual({
+			isError: true,
+			name: "CustomError",
+			message: "custom failure",
+			code: "E_CUSTOM",
+			hasStack: true,
+		});
+	});
+
+	it("preserves Error properties from async bindings that reject", async () => {
+		driver = createDriverWithBindings({
+			fetchRemote: async () => {
+				const err = new Error("not found") as Error & { code?: string };
+				err.name = "HttpError";
+				err.code = "E_NOT_FOUND";
+				throw err;
+			},
+		});
+
+		const result = await driver.run(`
+			let caught;
+			try {
+				SecureExec.bindings.fetchRemote();
+			} catch (e) {
+				caught = { name: e.name, message: e.message, code: e.code };
+			}
+			module.exports = caught;
+		`);
+		expect(result.code).toBe(0);
+		expect(result.exports).toEqual({
+			name: "HttpError",
+			message: "not found",
+			code: "E_NOT_FOUND",
+		});
+	});
+
+	it("still surfaces string-valued __bd_error as a plain Error message", async () => {
+		// Guard against regressing the branch that handles non-object __bd_error values
+		// (e.g. the "No handler: …" fallback path).
+		driver = createDriverWithBindings({
+			throwString: () => {
+				// eslint-disable-next-line @typescript-eslint/no-throw-literal
+				throw "plain string error";
+			},
+		});
+
+		const result = await driver.run(`
+			let caught;
+			try {
+				SecureExec.bindings.throwString();
+			} catch (e) {
+				caught = { isError: e instanceof Error, message: e.message };
+			}
+			module.exports = caught;
+		`);
+		expect(result.code).toBe(0);
+		expect(result.exports).toMatchObject({
+			isError: true,
+			message: expect.stringContaining("plain string error"),
+		});
+	});
 });

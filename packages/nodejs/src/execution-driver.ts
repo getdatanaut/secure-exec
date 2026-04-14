@@ -1675,7 +1675,7 @@ function buildBindingsInflationSnippet(bindingKeys: string[]): string {
 var __bindingKeys__=${JSON.stringify(bindingKeys)};
 var tree={};
 function makeBindFn(bk){
-return function(){var args=Array.prototype.slice.call(arguments);var encoded="__bd:"+bk+":"+JSON.stringify(args);var r=_loadPolyfill.applySyncPromise(undefined,[encoded]);if(r===null)return undefined;try{var p=JSON.parse(r);if(p.__bd_error)throw new Error(p.__bd_error);return p.__bd_result;}catch(e){if(e.message&&e.message.startsWith("No handler:"))return undefined;throw e;}};
+return function(){var args=Array.prototype.slice.call(arguments);var encoded="__bd:"+bk+":"+JSON.stringify(args);var r=_loadPolyfill.applySyncPromise(undefined,[encoded]);if(r===null)return undefined;try{var p=JSON.parse(r);if(p.__bd_error){var bd=p.__bd_error;var e=new Error(typeof bd==="object"?bd.message:bd);if(typeof bd==="object"){if(bd.name)e.name=bd.name;if(bd.code)e.code=bd.code;if(bd.stack)e.stack=bd.stack;}throw e;}return p.__bd_result;}catch(e){if(e.message&&e.message.startsWith("No handler:"))return undefined;throw e;}};
 }
 for(var i=0;i<__bindingKeys__.length;i++){
 var parts=__bindingKeys__[i].split(".");
