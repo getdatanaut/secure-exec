@@ -34,7 +34,16 @@ fn read_v8_version(lock_path: &Path) -> String {
     panic!("failed to locate v8 version in {}", lock_path.display());
 }
 
-fn find_v8_icu_data(v8_version: &str) -> PathBuf {
+fn find_v8_icu_data(manifest_dir: &Path, v8_version: &str) -> PathBuf {
+    // Prefer a vendored full ICU 77 bundle. The subsets the `v8` crate ships
+    // (`flutter_desktop`, `chromecast_video`) prune resource categories that
+    // `Intl.DateTimeFormat` / `Date.prototype.toLocale*` need, causing V8 to
+    // wrap the ICU resource-miss as `FatalProcessOutOfMemory`.
+    let vendored = manifest_dir.join("icudtl.dat");
+    if vendored.exists() {
+        return vendored;
+    }
+
     let registry_src = cargo_home().join("registry").join("src");
     let candidates = [
         Path::new("third_party/icu/common/icudtl.dat"),
@@ -43,11 +52,16 @@ fn find_v8_icu_data(v8_version: &str) -> PathBuf {
     ];
 
     let entries = fs::read_dir(&registry_src).unwrap_or_else(|error| {
-        panic!("failed to read cargo registry src {}: {}", registry_src.display(), error)
+        panic!(
+            "failed to read cargo registry src {}: {}",
+            registry_src.display(),
+            error
+        )
     });
 
     for entry in entries {
-        let entry = entry.unwrap_or_else(|error| panic!("failed to inspect cargo registry entry: {}", error));
+        let entry = entry
+            .unwrap_or_else(|error| panic!("failed to inspect cargo registry entry: {}", error));
         let crate_root = entry.path().join(format!("v8-{}", v8_version));
         for relative in candidates {
             let candidate = crate_root.join(relative);
@@ -65,15 +79,17 @@ fn find_v8_icu_data(v8_version: &str) -> PathBuf {
 }
 
 fn main() {
-    let manifest_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set"));
+    let manifest_dir =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set"));
     let lock_path = manifest_dir.join("Cargo.lock");
     let out_dir = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set"));
 
     println!("cargo:rerun-if-changed={}", lock_path.display());
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=icudtl.dat");
 
     let v8_version = read_v8_version(&lock_path);
-    let icu_data = find_v8_icu_data(&v8_version);
+    let icu_data = find_v8_icu_data(&manifest_dir, &v8_version);
     let dest_path = out_dir.join("icudtl.dat");
 
     fs::copy(&icu_data, &dest_path).unwrap_or_else(|error| {
