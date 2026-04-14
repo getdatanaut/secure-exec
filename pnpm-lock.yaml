@@ -382,17 +382,17 @@ importers:
         version: 1.6.4
     optionalDependencies:
       '@secure-exec/v8-darwin-arm64':
-        specifier: 0.2.0
-        version: 0.2.0
+        specifier: 0.2.1
+        version: 0.2.1
       '@secure-exec/v8-darwin-x64':
-        specifier: 0.2.0
-        version: 0.2.0
+        specifier: 0.2.1
+        version: 0.2.1
       '@secure-exec/v8-linux-arm64-gnu':
-        specifier: 0.2.0
-        version: 0.2.0
+        specifier: 0.2.1
+        version: 0.2.1
       '@secure-exec/v8-linux-x64-gnu':
-        specifier: 0.2.0
-        version: 0.2.0
+        specifier: 0.2.1
+        version: 0.2.1
     devDependencies:
       '@types/node':
         specifier: ^22.10.2
@@ -3601,32 +3601,32 @@ packages:
     requiresBuild: true
     optional: true
 
-  /@secure-exec/v8-darwin-arm64@0.2.0:
-    resolution: {integrity: sha512-78g4QN8NFr2P54fu0U1el/rmrR+KSZM7ZCKwJY9D1+cAahY6IEUj53kT3VOTdTNkA7hV/kLDHo+fGEIg+bKRPQ==}
+  /@secure-exec/v8-darwin-arm64@0.2.1:
+    resolution: {integrity: sha512-gEWhMHzUpLwzuBNAD0lVkZXE8wFlWMLp4IOZ+56FYwOW/C+m07cYxuW4TjHyPqZ+vPm3IkoaMqqH5yT9VhjX/Q==}
     cpu: [arm64]
     os: [darwin]
     requiresBuild: true
     dev: false
     optional: true
 
-  /@secure-exec/v8-darwin-x64@0.2.0:
-    resolution: {integrity: sha512-W/FKOYrkAyTQu9Q6hr8oRrzNfUm1gxguVlxHUIXvLbI6er/E1lKUAl+TnfkixliWreDC8y8f8hg1MqZK1xkL3w==}
+  /@secure-exec/v8-darwin-x64@0.2.1:
+    resolution: {integrity: sha512-H2Z5K+Cq+fn/kxjGvhJzepnNFWG6qNdyhZybVWGr5bAAZoSz/Qkad4WnXcurWU+880tKDtnf19LHBXrg7zewNQ==}
     cpu: [x64]
     os: [darwin]
     requiresBuild: true
     dev: false
     optional: true
 
-  /@secure-exec/v8-linux-arm64-gnu@0.2.0:
-    resolution: {integrity: sha512-ZT9nmtf0tM9uoJX1taH55dFb9hpfi6iStJgjTktF/OgpjV1bTpwy1OYPCsn9q0ojEdSiVOI8e6NV0cdwsJCe3w==}
+  /@secure-exec/v8-linux-arm64-gnu@0.2.1:
+    resolution: {integrity: sha512-14subGhVV/gW35mYYm7Gv1Keeex7PxIgQfoKji/JH7wYyDuarP6kgaES0nJw+JXVkxEVud52c+kbcIjIggqCEw==}
     cpu: [arm64]
     os: [linux]
     requiresBuild: true
     dev: false
     optional: true
 
-  /@secure-exec/v8-linux-x64-gnu@0.2.0:
-    resolution: {integrity: sha512-vyyXcJE3LueYymBdxSsqkKYd2FTOSsCGDKP+s71V9Wx7rLNQ2m/4CjkpvWwmR+KIGjCD8qvFpWQfuUEqQWfMOQ==}
+  /@secure-exec/v8-linux-x64-gnu@0.2.1:
+    resolution: {integrity: sha512-Az4s+vUf+78vWtsC7rTn/jQc6WKJafAdt2YpEjB4Gnu+sX+FFTIst1hRV4gJonbRyJdy6SW+OQ6DZatmwczorQ==}
     cpu: [x64]
     os: [linux]
     requiresBuild: true

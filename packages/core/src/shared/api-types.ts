@@ -53,6 +53,7 @@ export interface OSConfig {
 export interface ExecutionStatus {
 	code: number;
 	errorMessage?: string;
+	errorStack?: string;
 }
 
 export interface RunResult<T = unknown> extends ExecutionStatus {

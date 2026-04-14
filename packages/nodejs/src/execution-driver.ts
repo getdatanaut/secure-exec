@@ -1027,7 +1027,7 @@ export class NodeExecutionDriver implements RuntimeDriver {
 			timingMitigation: options?.timingMitigation,
 			onStdio: options?.onStdio,
 		});
-		return { code: result.code, errorMessage: result.errorMessage };
+		return { code: result.code, errorMessage: result.errorMessage, errorStack: result.errorStack };
 	}
 
 	private async executeInternal<T = unknown>(options: {
@@ -1406,6 +1406,7 @@ export class NodeExecutionDriver implements RuntimeDriver {
 				return {
 					code: finalExitCode,
 					errorMessage: boundErrorMessage(errMessage),
+					errorStack: result.error.stack,
 					exports: undefined as T,
 				};
 			}
@@ -1460,6 +1461,7 @@ export class NodeExecutionDriver implements RuntimeDriver {
 			return {
 				code: finalExitCode,
 				errorMessage: boundErrorMessage(errMessage),
+				errorStack: err instanceof Error ? err.stack : undefined,
 				exports: undefined as T,
 			};
 		} finally {
